@@ -48,9 +48,15 @@ HTML_FORM = """<!DOCTYPE html>
 
     <div style="max-width: 850px; margin: 0 auto; background: #ffffff; padding: 35px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08); border: 1px solid #e5e7eb;">
         
-        <div style="border-bottom: 2px solid #1f3864; padding-bottom: 15px; margin-bottom: 25px;">
-            <h1 style="color: #1f3864; margin: 0; font-size: 24px;">Phase 1: Manual Project Data Entry (16 Fields)</h1>
-            <p style="color: #6b7280; margin-top: 6px; font-size: 14px;">Fill this form to manually add a project. Submitting automatically normalises, saves to SQLite, and appends to <b>construction_projects.xlsx</b>.</p>
+        <div style="border-bottom: 2px solid #1f3864; padding-bottom: 15px; margin-bottom: 25px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
+            <div>
+                <h1 style="color: #1f3864; margin: 0; font-size: 24px;">Phase 1: Manual Project Data Entry (16 Fields)</h1>
+                <p style="color: #6b7280; margin-top: 6px; font-size: 14px; margin-bottom: 0;">Fill this form to manually add a project. Submitting automatically normalises, saves to SQLite, and updates Excel.</p>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <a href="/projects" style="background: #2563eb; color: white; padding: 10px 16px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 13px; display: inline-block;">📊 View All Projects</a>
+                <a href="/download-excel" style="background: #059669; color: white; padding: 10px 16px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 13px; display: inline-block;">📥 Download Excel</a>
+            </div>
         </div>
 
         {notification}
@@ -197,6 +203,91 @@ class RequestHandler(BaseHTTPRequestHandler):
 
             rendered = HTML_FORM.replace("{notification}", notification)
             self.wfile.write(rendered.encode("utf-8"))
+
+        elif self.path == "/download-excel":
+            excel_path = Path(__file__).resolve().parent / "output" / "construction_projects.xlsx"
+            if not excel_path.exists():
+                init_db()
+                session = get_session()
+                export_to_excel(all_projects(session), all_scrape_runs(session))
+
+            if excel_path.exists():
+                self.send_response(200)
+                self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                self.send_header("Content-Disposition", 'attachment; filename="construction_projects.xlsx"')
+                self.send_header("Content-Length", str(excel_path.stat().st_size))
+                self.end_headers()
+                with open(excel_path, "rb") as f:
+                    self.wfile.write(f.read())
+            else:
+                self.send_error(404, "Excel file not found")
+
+        elif self.path == "/projects" or self.path.startswith("/projects?"):
+            init_db()
+            session = get_session()
+            projects = all_projects(session)
+
+            rows_html = ""
+            for p in projects:
+                rows_html += f"""
+                <tr style="border-bottom: 1px solid #e5e7eb;">
+                    <td style="padding: 10px; font-weight: 600; color: #1f2937;">{html.escape(p.builder_name or '')}</td>
+                    <td style="padding: 10px;">{html.escape(p.project_name or '')}</td>
+                    <td style="padding: 10px;">{html.escape(p.location or '')}</td>
+                    <td style="padding: 10px;">{html.escape(p.project_value or '')}</td>
+                    <td style="padding: 10px;">{html.escape(p.decision_maker or '')} ({html.escape(p.mobile or '')})</td>
+                    <td style="padding: 10px; font-weight: bold; color: #10b981;">{p.lead_score or 0}</td>
+                    <td style="padding: 10px;">{html.escape(p.current_stage or '')}</td>
+                    <td style="padding: 10px;">{html.escape(p.material_categories or '')}</td>
+                </tr>
+                """
+
+            projects_page = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Saved Construction Projects — Granite Lead System</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f3f4f6; margin: 0; padding: 30px; color: #1f2937;">
+    <div style="max-width: 1100px; margin: 0 auto; background: #ffffff; padding: 35px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); border: 1px solid #e5e7eb;">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #1f3864; padding-bottom: 15px; margin-bottom: 25px;">
+            <div>
+                <h1 style="color: #1f3864; margin: 0; font-size: 24px;">Saved & Scraped Construction Projects ({len(projects)})</h1>
+                <p style="color: #6b7280; margin-top: 6px; font-size: 14px; margin-bottom: 0;">Showing all stored records in SQLite database.</p>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <a href="/" style="background: #4b5563; color: white; padding: 10px 16px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 13px;">➕ Add Project Form</a>
+                <a href="/download-excel" style="background: #059669; color: white; padding: 10px 16px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 13px;">📥 Download Excel</a>
+            </div>
+        </div>
+
+        <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 14px;">
+                <thead>
+                    <tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0; color: #475569;">
+                        <th style="padding: 12px;">Builder Name</th>
+                        <th style="padding: 12px;">Project Name</th>
+                        <th style="padding: 12px;">Location</th>
+                        <th style="padding: 12px;">Project Value</th>
+                        <th style="padding: 12px;">Decision Maker & Contact</th>
+                        <th style="padding: 12px;">Lead Score</th>
+                        <th style="padding: 12px;">Stage</th>
+                        <th style="padding: 12px;">Materials</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {rows_html if rows_html else '<tr><td colspan="8" style="padding: 20px; text-align: center; color: #9ca3af;">No projects saved yet. Fill out the form to add one!</td></tr>'}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(projects_page.encode("utf-8"))
         else:
             self.send_error(404, "Page Not Found")
 
